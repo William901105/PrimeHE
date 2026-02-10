@@ -1,0 +1,142 @@
+import os
+import time
+
+print("=== 1. 載入 primehe.sage 核心 (PKE 模式 - 修正版) ===")
+try:
+    load('primehe.sage')
+    print("-> 載入成功！")
+except Exception as e:
+    print(f"-> [錯誤] 無法載入 primehe.sage: {e}")
+    exit()
+
+# 隨機數生成器適配器
+def system_random8():
+    return int(os.urandom(1)[0])
+
+def run_pke_test_batch(sys_name, iterations):
+    print(f"\n" + "="*60)
+    print(f"正在測試參數集: [{sys_name}]")
+    print("="*60)
+    print(f"預計執行次數: {iterations}")
+
+    # 1. 設定參數
+    try:
+        setparameters(sys_name, system_random8)
+        print(f"參數設定: p={p}, q={q}, w={w}")
+    except Exception as e:
+        print(f"[参数设置失败] {e}")
+        import traceback
+        traceback.print_exc()
+        return 0, 0
+
+    add_correct_count = 0
+    mult_correct_count = 0
+
+    # 2. KeyGen (接收 pk, sk, evk)
+    try:
+        t_start = time.time()
+        pk, sk, evk = ZKeyGen()
+        print(f"  [KeyGen] 完成 ({time.time()-t_start:.4f}s)")
+    except Exception as e:
+        print(f"[KeyGen 錯誤] {e}")
+        import traceback
+        traceback.print_exc()
+        return 0, 0
+
+    for i in range(iterations):
+        print(f"\n--- Round {i+1} / {iterations} ---")
+        try:  
+            # 3. 準備明文 (Short Polynomials)
+            r1 = Inputs_random()
+            r2 = Inputs_random()
+            
+            # 為了驗證，先計算預期的明文結果 (在 R3 環中運算)
+            # m_add = r1 + r2 mod 3
+            # m_mult = r1 * r2 mod 3
+            expected_add = R_fromR3(R3_fromR(r1 + r2))
+            expected_mult = R_fromR3(R3_fromR(r1 * r2))
+
+            # 4. 加密
+            c1 = ZEncrypt(r1, pk)
+            c2 = ZEncrypt(r2, pk)
+            print(f"  [Encrypt] 完成")
+            
+            
+            # ==========================================
+            # 測試 A: 同態加法
+            # ==========================================
+            try:
+                t_add = time.time()
+                c_add = homomorphic_add(c1, c2)
+                print(f"  [Add] 運算完成 ({time.time()-t_add:.4f}s)")
+                r_dec_add = ZDecrypt(c_add, sk)
+                
+                if r_dec_add == expected_add:
+                    add_correct_count += 1
+                    print("  -> [加法] ★ 成功")
+                else:
+                    print("  -> [加法] X 失敗 (解密結果不匹配)")
+            except Exception as e:
+                print(f"  -> [加法] 執行錯誤: {e}")
+
+            
+            # ==========================================
+            # 測試 B: 同態乘法 
+            # ==========================================
+            try:
+                t_mult = time.time()
+                # 呼叫同態乘法，傳入 evk
+                c_mult = homomorphic_mult(c1, c2, evk)
+                print(f"  [Mult] 運算完成 ({time.time()-t_mult:.4f}s)")
+                
+                # 解密乘法結果
+                r_dec_mult = ZDecrypt(c_mult, sk)
+                
+                if r_dec_mult == expected_mult:
+                    mult_correct_count += 1
+                    print("  -> [乘法] ★ 成功")
+                else:
+                    print("  -> [乘法] X 失敗 (解密結果不匹配)")
+                    # Debug 資訊 (可選)
+                    # print(f"     預期: {list(expected_mult)[:5]}...")
+                    # print(f"     實際: {list(r_dec_mult)[:5]}...")
+                    
+            except Exception as e:
+                print(f"  -> [乘法] 執行錯誤: {e}")
+                import traceback
+                traceback.print_exc()
+
+        except Exception as e:
+            print(f"  -> [流程錯誤] KeyGen 或 Encrypt 失敗: {e}")
+            import traceback
+            traceback.print_exc()
+            # 如果 KeyGen 失敗，這一輪就算全錯
+            pass
+            
+    return add_correct_count, mult_correct_count
+
+# --- 主程式 ---
+
+print("\n=== 2. 開始執行同態運算測試 (Add & Mult) ===")
+
+# 建議先測小參數，因為乘法生成 EVK 很慢
+systems_to_test = ['sntrupHo601'] 
+# systems_to_test = ['sntrup653', 'sntrup761']
+
+results = {}
+iterations = 5  # 測試次數
+
+for sys_name in systems_to_test:
+    add_score, mult_score = run_pke_test_batch(sys_name, iterations)
+    results[sys_name] = (add_score, mult_score)
+
+print("\n" + "="*50)
+print(f"{'參數集':<12} | {'加法成功率':<12} | {'乘法成功率':<12}")
+print("-" * 50)
+for name, (add_s, mult_s) in results.items():
+    # [修正] 使用 float() 強制轉型，將分數轉為浮點數
+    add_rate = float(add_s / iterations) * 100
+    mult_rate = float(mult_s / iterations) * 100
+    
+    print(f"{name:<12} | {add_rate:>5.1f}% ({add_s}/{iterations})  | {mult_rate:>5.1f}% ({mult_s}/{iterations})")
+print("="*50)

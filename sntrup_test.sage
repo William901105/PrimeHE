@@ -1,0 +1,91 @@
+import os
+import time
+
+print("=== 1. 載入 sntrup.sage 核心 ===")
+try:
+    load('sntrup.sage')
+    print("-> 載入成功！")
+except Exception as e:
+    print(f"-> [錯誤] 無法載入 sntrup.sage: {e}")
+    exit()
+
+# 隨機數生成器適配器 (給 setparameters 使用)
+def system_random8():
+    return int(os.urandom(1)[0])
+
+def run_test_case(sys_name):
+    print(f"\n[{sys_name}] 測試開始...")
+    start_time = time.time()
+    
+    try:
+        # 1. 設定參數
+        # 這裡會動態切換 sntrup.sage 內部的全域變數 (p, q, w 等)
+        setparameters(sys_name, system_random8)
+        
+        # 2. KeyGen (密鑰生成)
+        print("  -> 生成密鑰 (KeyGen)...", end=" ")
+        pk, sk = KEM_KeyGen()
+        print(f"OK (公鑰: {len(pk)} bytes, 私鑰: {len(sk)} bytes)")
+        
+        # 3. Encapsulation (封裝)
+        print("  -> 執行封裝 (Encap)... ", end=" ")
+        c, k_enc = Encap(pk)
+        print(f"OK (密文: {len(c)} bytes)")
+        
+        # 4. Decapsulation (解封裝)
+        print("  -> 執行解封裝 (Decap)...", end=" ")
+        k_dec = Decap(c, sk)
+        print("OK")
+        
+        # 5. 正確性驗證
+        if k_enc == k_dec:
+            print(f"  -> [PASS] 正確性驗證通過：共享密鑰一致。")
+        else:
+            print(f"  -> [FAIL] 錯誤：共享密鑰不匹配！")
+            return False
+
+        # 6. 安全性驗證 (隱式拒絕測試)
+        # 修改密文的一個 byte，確認解出的密鑰是否改變
+        c_list = list(c) #轉為 list 修改
+        c_list[0] = (c_list[0] + 1) % 256
+        c_bad = bytes(c_list) # 轉回 bytes
+        
+        k_bad = Decap(c_bad, sk)
+        
+        if k_bad != k_enc:
+            print(f"  -> [PASS] 安全性驗證通過：篡改密文導致密鑰改變 (Implicit Rejection)。")
+        else:
+            print(f"  -> [FAIL] 嚴重警告：篡改密文後竟然解出相同的密鑰！")
+            return False
+            
+        elapsed = time.time() - start_time
+        print(f"  -> 耗時: {elapsed:.4f} 秒")
+        return True
+
+    except Exception as e:
+        print(f"\n  -> [ERROR] 程式執行錯誤: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+# --- 主程式 ---
+
+print("\n=== 2. 準備測試所有參數集 ===")
+
+# 從 sntrup 字典中取得所有鍵值 (例如 'sntrup761', 'sntrup857'...)
+# 為了美觀，我們根據數字大小排序
+all_systems = sorted(sntrup.keys(), key=lambda x: int(''.join(filter(str.isdigit, x)) or 0))
+
+results = {}
+
+for sys_name in all_systems:
+    # 執行測試
+    success = run_test_case(sys_name)
+    results[sys_name] = "PASS" if success else "FAIL"
+
+print("\n" + "="*40)
+print(f"{'參數集 (Parameter Set)':<20} | {'結果 (Result)'}")
+print("-" * 40)
+for name, res in results.items():
+    print(f"{name:<20} | {res}")
+print("="*40)
