@@ -1,7 +1,8 @@
 import os
 import time
+import gc  # [新增] 載入 Python 的垃圾回收模組
 
-print("=== 1. 載入 primehe.sage 核心 (PKE 模式 - 修正版) ===")
+print("=== 1. 載入 primehe.sage 核心 (PKE 模式 - 效能測試版) ===")
 try:
     load('primehe.sage')
     print("-> 載入成功！")
@@ -15,9 +16,8 @@ def system_random8():
 
 def run_pke_test_batch(sys_name, iterations):
     print(f"\n" + "="*60)
-    print(f"正在測試參數集: [{sys_name}]")
+    print(f"正在測試參數集: [{sys_name}] | 預計執行次數: {iterations}")
     print("="*60)
-    print(f"預計執行次數: {iterations}")
 
     # 1. 設定參數
     try:
@@ -25,42 +25,49 @@ def run_pke_test_batch(sys_name, iterations):
         print(f"參數設定: p={p}, q={q}, w={w}")
     except Exception as e:
         print(f"[参数设置失败] {e}")
-        import traceback
-        traceback.print_exc()
-        return 0, 0
+        return None
 
     add_correct_count = 0
     mult_correct_count = 0
 
-    # 2. KeyGen (接收 pk, sk, evk)
+    # 記錄時間的累加器
+    time_keygen = 0
+    total_time_encrypt = 0
+    total_time_add = 0
+    total_time_dec_add = 0
+    total_time_mult = 0
+    total_time_dec_mult = 0
+
+    # 2. KeyGen (只執行一次)
     try:
         t_start = time.time()
         pk, sk, evk = ZKeyGen()
-        print(f"  [KeyGen] 完成 ({time.time()-t_start:.4f}s)")
+        time_keygen = time.time() - t_start
+        print(f"  [KeyGen] 完成 (耗時: {time_keygen:.4f}s)")
     except Exception as e:
         print(f"[KeyGen 錯誤] {e}")
-        import traceback
-        traceback.print_exc()
-        return 0, 0
+        return None
+
+    print("  [開始迴圈測試] ", end="", flush=True)
 
     for i in range(iterations):
-        print(f"\n--- Round {i+1} / {iterations} ---")
+        # 印出簡單的進度點，避免畫面太亂
+        if (i + 1) % 1 == 0:
+            print(".", end="", flush=True)
+            
         try:  
-            # 3. 準備明文 (Short Polynomials)
+            # 3. 準備明文
             r1 = Inputs_random()
             r2 = Inputs_random()
             
-            # 為了驗證，先計算預期的明文結果 (在 R3 環中運算)
-            # m_add = r1 + r2 mod 3
-            # m_mult = r1 * r2 mod 3
             expected_add = R_fromR3(R3_fromR(r1 + r2))
             expected_mult = R_fromR3(R3_fromR(r1 * r2))
 
             # 4. 加密
+            t_start_encrypt = time.time()
             c1 = ZEncrypt(r1, pk)
             c2 = ZEncrypt(r2, pk)
-            print(f"  [Encrypt] 完成")
-            
+            total_time_encrypt += (time.time() - t_start_encrypt)
             
             # ==========================================
             # 測試 A: 同態加法
@@ -68,75 +75,124 @@ def run_pke_test_batch(sys_name, iterations):
             try:
                 t_add = time.time()
                 c_add = homomorphic_add(c1, c2)
-                print(f"  [Add] 運算完成 ({time.time()-t_add:.4f}s)")
+                total_time_add += (time.time() - t_add)
+
+                t_add_dec = time.time()
                 r_dec_add = ZDecrypt(c_add, sk)
+                total_time_dec_add += (time.time() - t_add_dec)
                 
                 if r_dec_add == expected_add:
                     add_correct_count += 1
-                    print("  -> [加法] ★ 成功")
-                else:
-                    print("  -> [加法] X 失敗 (解密結果不匹配)")
             except Exception as e:
-                print(f"  -> [加法] 執行錯誤: {e}")
+                pass 
 
-            
             # ==========================================
             # 測試 B: 同態乘法 
             # ==========================================
             try:
                 t_mult = time.time()
-                # 呼叫同態乘法，傳入 evk
                 c_mult = homomorphic_mult(c1, c2, evk)
-                print(f"  [Mult] 運算完成 ({time.time()-t_mult:.4f}s)")
+                total_time_mult += (time.time() - t_mult)
                 
-                # 解密乘法結果
+                t_mult_dec = time.time()
                 r_dec_mult = ZDecrypt(c_mult, sk)
+                total_time_dec_mult += (time.time() - t_mult_dec)
                 
                 if r_dec_mult == expected_mult:
                     mult_correct_count += 1
-                    print("  -> [乘法] ★ 成功")
-                else:
-                    print("  -> [乘法] X 失敗 (解密結果不匹配)")
-                    # Debug 資訊 (可選)
-                    # print(f"     預期: {list(expected_mult)[:5]}...")
-                    # print(f"     實際: {list(r_dec_mult)[:5]}...")
-                    
             except Exception as e:
-                print(f"  -> [乘法] 執行錯誤: {e}")
-                import traceback
-                traceback.print_exc()
+                pass
 
         except Exception as e:
-            print(f"  -> [流程錯誤] KeyGen 或 Encrypt 失敗: {e}")
-            import traceback
-            traceback.print_exc()
-            # 如果 KeyGen 失敗，這一輪就算全錯
             pass
+
+        # === [新增] 每回合結束後，強制釋放佔用記憶體的大變數 ===
+        try:
+            del r1, r2, expected_add, expected_mult, c1, c2
+        except NameError: 
+            import traceback
+            print("[Key 釋放錯誤] 可能因為 KeyGen 失敗而未定義，詳細錯誤如下：")
+            traceback.print_exc() 
+        try:
+            del c_add, r_dec_add
+        except NameError: 
+            import traceback
+            print("[Key 釋放錯誤] 可能因為 KeyGen 失敗而未定義，詳細錯誤如下：")
+            traceback.print_exc() 
+        try:
+            del c_mult, r_dec_mult
+        except NameError: 
+            import traceback
+            print("[Key 釋放錯誤] 可能因為 KeyGen 失敗而未定義，詳細錯誤如下：")
+            traceback.print_exc() 
+        
+        # 呼叫垃圾回收器，清理孤立的記憶體碎片
+        gc.collect()
             
-    return add_correct_count, mult_correct_count
+    print(" 完成!")
+
+    # 計算平均時間
+    avg_enc_ms = (total_time_encrypt / (2 * iterations)) * 1000 
+    avg_add_ms = (total_time_add / iterations) * 1000
+    avg_dec_add_ms = (total_time_dec_add / iterations) * 1000
+    avg_mult_ms = (total_time_mult / iterations) * 1000
+    avg_dec_mult_ms = (total_time_dec_mult / iterations) * 1000
+
+    # === [新增] 準備離開函式前，釋放該參數集的 Keys ===
+    try:
+        del pk, sk, evk
+    except NameError: 
+        import traceback
+        print("[Key 釋放錯誤] 可能因為 KeyGen 失敗而未定義，詳細錯誤如下：")
+        traceback.print_exc()   
+    gc.collect()
+
+    return {
+        "add_score": add_correct_count,
+        "mult_score": mult_correct_count,
+        "t_keygen_s": time_keygen,
+        "t_enc_ms": avg_enc_ms,
+        "t_add_ms": avg_add_ms,
+        "t_dec_add_ms": avg_dec_add_ms,
+        "t_mult_ms": avg_mult_ms,
+        "t_dec_mult_ms": avg_dec_mult_ms
+    }
 
 # --- 主程式 ---
 
-print("\n=== 2. 開始執行同態運算測試 (Add & Mult) ===")
+print("\n=== 2. 開始執行同態運算效能評估 ===")
 
-# 建議先測小參數，因為乘法生成 EVK 很慢
-systems_to_test = ['sntrupHo601'] 
-# systems_to_test = ['sntrup653', 'sntrup761']
+systems_to_test = ['sntrupHo1637'] 
+#systems_to_test = ['sntrupHo653', 'sntrupHo761', 'sntrupHo857', 'sntrupHo953', 'sntrupHo1013', 'sntrupHo1277', 'sntrupHo1609', 'sntrupHo1637']
 
 results = {}
-iterations = 5  # 測試次數
+iterations = 10  # 設定為跑 10 次取平均 (測試用)
 
 for sys_name in systems_to_test:
-    add_score, mult_score = run_pke_test_batch(sys_name, iterations)
-    results[sys_name] = (add_score, mult_score)
+    res = run_pke_test_batch(sys_name, iterations)
+    if res:
+        results[sys_name] = res
 
-print("\n" + "="*50)
-print(f"{'參數集':<12} | {'加法成功率':<12} | {'乘法成功率':<12}")
-print("-" * 50)
-for name, (add_s, mult_s) in results.items():
-    # [修正] 使用 float() 強制轉型，將分數轉為浮點數
-    add_rate = float(add_s / iterations) * 100
-    mult_rate = float(mult_s / iterations) * 100
+# --- 輸出最終數據表 ---
+print("\n" + "="*100)
+print(f" {'Performance Analysis (Average over iterations)':^98} ")
+print("="*100)
+print(f"{'Parameter Set':<15} | {'KeyGen (s)':<12} | {'Encrypt (ms)':<12} | {'Add (ms)':<10} | {'Mult (ms)':<12} | {'Decrypt (ms)':<12}")
+print("-" * 100)
+
+for name, data in results.items():
+    t_keygen = float(data['t_keygen_s'])
+    t_enc    = float(data['t_enc_ms'])
+    t_add    = float(data['t_add_ms'])
+    t_mult   = float(data['t_mult_ms'])
+    t_dec    = float(data['t_dec_mult_ms'])
     
-    print(f"{name:<12} | {add_rate:>5.1f}% ({add_s}/{iterations})  | {mult_rate:>5.1f}% ({mult_s}/{iterations})")
-print("="*50)
+    print(f"{name:<15} | {t_keygen:>12.4f} | {t_enc:>12.2f} | {t_add:>10.4f} | {t_mult:>12.2f} | {t_dec:>12.2f}")
+
+print("-" * 100)
+print("Success Rates:")
+for name, data in results.items():
+    add_rate = (float(data['add_score']) / iterations) * 100
+    mult_rate = (float(data['mult_score']) / iterations) * 100
+    print(f" - {name}: Add {add_rate:.1f}%, Mult {mult_rate:.1f}%")
+print("="*100)

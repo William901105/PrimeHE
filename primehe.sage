@@ -16,7 +16,14 @@ sntrup = { # round1, p, q, w, lpr
   'sntrup953':    (False, 953, 6343, 198, False),
   'sntrup1013':   (False, 1013, 7177, 224, False),
   'sntrup1277':   (False, 1277, 7879, 246, False),
-  'sntrupHo601':     (False, 601, 367370251, 137, False),
+  'sntrupHo653':     (False, 653, 389069029, 135, False),#4
+  'sntrupHo761':     (False, 761, 613622227, 158, False),
+  'sntrupHo857':     (False, 857, 823331527, 173, False),
+  'sntrupHo953':     (False, 953, 1241158411, 202, False),
+  'sntrupHo1013':    (False, 1013, 1655076961, 227, False),
+  'sntrupHo1277':    (False, 1277, 3230435893, 284, False),
+  'sntrupHo1609':    (False, 1609, 5249595271, 323, False),
+  'sntrupHo1637':    (False, 1637, 5669857537, 341, False),# 4
 }
 
 def setparameters(system, random8):
@@ -24,6 +31,7 @@ def setparameters(system, random8):
   global p
   global q
   global w
+  global b
   
   global PublicKeys_bytes
   global SecretKeys_bytes
@@ -38,6 +46,8 @@ def setparameters(system, random8):
   global mult_count
 
   mult_count = 1
+  b = 2**2
+
   if system in sntrup:
     round1, p, q, w, lpr_flag = sntrup[system]
     
@@ -256,7 +266,6 @@ def setparameters(system, random8):
 
   def Decrypt(c,k):
     global mult_count
-    print(f"Decrypting with mult_count = {mult_count-1}")
     f,v = k
     #assert Rounded_is(c)
     assert Short_is(f)
@@ -468,34 +477,40 @@ def setparameters(system, random8):
   global Gadget_Product
   global Vector_DotProduct
 
-  def get_log_q():
-    """計算需要的位元數 l = ceil(log2(q))"""
-    return Integer(q).nbits()
+  def ceil_log_b(val, b):
+    """
+    計算 ceil(log_b(val))。
+    使用純整數運算，避免大整數在計算浮點數 log 時遺失精準度。
+    """
+    if val <= 1:
+        return 0
+    res = 0
+    curr = 1
+    while curr < val:
+        curr *= b
+        res += 1
+    return res
   
   def BitDecompose_poly(A):
     """
-    輸入: A (必須是 R 中的多項式, Integer Polynomial)
-    輸出: [p0, p1, ..., pl-1] (每個 pi 都是 R 中的多項式)
+    輸入: 
+        A: 必須是 R 中的多項式 (Integer Polynomial)
+        b: 分解的基底 (Base, 大於 1 的整數)
+    輸出: [p0, p1, ..., pl-1] (每個 pi 都是 R 中的多項式，且係數介於 0 到 b-1 之間)
     """
-    # 1. 取得位元長度 l = ceil(log2(q))
-    # 這裡使用 Integer(q) 確保可以呼叫 nbits 方法
-    l = Integer(q).nbits()
+    global b
+    # 1. 計算 l = ceil(log_b(q))
+    # 利用不斷整除來求得精確的層數 l，避免 math.log 的浮點數誤差
+    l = ceil_log_b(q, b)
 
-    # 2. 驗證輸入型別 (根據您的要求)
-    # 如果 A 不是 R 的元素，這裡會報錯，或者您可以選擇在此處強制轉型 A = R(A)
+    # 2. 驗證輸入型別
     if A.parent() != R:
-        # 為了容錯，如果傳進來的是 Rq，我們嘗試轉回 R
-        # 但如果傳入的是 list 或 int，這行會報錯
         try:
             A = R(A)
         except TypeError:
             raise TypeError(f"BitDecompose 輸入必須是 R 中的多項式，目前是: {A.parent()}")
 
     # 3. 係數正規化 (Normalization)
-    # 這是最關鍵的一步！
-    # R 中的多項式係數可能是負的 (例如 -1, 0, 1)。
-    # 在進行位元分解前，我們必須將其映射到 [0, q-1] 的正整數區間。
-    # Python 的 % 運算子對負數處理得很好: -1 % 4591 = 4590
     raw_coeffs = list(A)
     coeffs = [int(c) % q for c in raw_coeffs]
     
@@ -503,18 +518,19 @@ def setparameters(system, random8):
     if len(coeffs) < p:
         coeffs += [0] * (p - len(coeffs))
     
-    # 4. 進行位元分解
-    # 我們直接建立 l 個係數列表，最後再轉成多項式
+    # 4. 進行 b-進制分解
     poly_list = []
     
     for i in range(l):
-        # 對於第 i 層，取出所有係數的第 i 個 bit
-        # bit_row 是一個長度為 p 的整數列表 (內容只有 0 或 1)
-        bit_row = [(c >> i) & 1 for c in coeffs]
+        # 計算當前層級的除數 (b 的 i 次方)
+        divisor = b ** i
         
-        # 5. [關鍵] 將列表轉為 R (整數環) 的多項式
-        # 這確保了後續與 evk (如果 evk 也是 R) 運算時不會有型別衝突
-        poly_in_R = R(bit_row)
+        # 對於第 i 層，取出所有係數在 b-進制下的第 i 個位數 (digit)
+        # 數學公式對應: (c // b^i) mod b
+        digit_row = [(c // divisor) % b for c in coeffs]
+        
+        # 5. 將列表轉為 R (整數環) 的多項式
+        poly_in_R = R(digit_row)
         poly_list.append(poly_in_R)
         
     return poly_list
@@ -526,12 +542,12 @@ def setparameters(system, random8):
     """
     assert B in R
 
-    l = get_log_q()
+    l = ceil_log_b(q, b)
     
     # 生成 2 的冪次列表
     result_vector = []
     for i in range(l):
-        scale = 2**i
+        scale = b**i
         result_vector.append(R_fromRq(Rq_fromR(B * scale)))
         
     return result_vector
