@@ -16,14 +16,14 @@ sntrup = { # round1, p, q, w, lpr
   'sntrup953':    (False, 953, 6343, 198, False),
   'sntrup1013':   (False, 1013, 7177, 224, False),
   'sntrup1277':   (False, 1277, 7879, 246, False),
-  'sntrupHo653':     (False, 653, 389069029, 135, False),#4
-  'sntrupHo761':     (False, 761, 613622227, 158, False),
-  'sntrupHo857':     (False, 857, 823331527, 173, False),
-  'sntrupHo953':     (False, 953, 1241158411, 202, False),
-  'sntrupHo1013':    (False, 1013, 1655076961, 227, False),
-  'sntrupHo1277':    (False, 1277, 3230435893, 284, False),
-  'sntrupHo1609':    (False, 1609, 5249595271, 323, False),
-  'sntrupHo1637':    (False, 1637, 5669857537, 341, False),# 4
+  'primehe653':     (False, 653, 389069029, 135, False),#4
+  'primehe761':     (False, 761, 613622227, 158, False),
+  'primehe857':     (False, 857, 823331527, 173, False),
+  'primehe53':     (False, 953, 1241158411, 202, False),
+  'primehe1013':    (False, 1013, 1655076961, 227, False),
+  'primehe1277':    (False, 1277, 3230435893, 284, False),
+  'primehe1609':    (False, 1609, 5249595271, 323, False),
+  'primehe1637':    (False, 1637, 5669857537, 341, False),# 4
 }
 
 def setparameters(system, random8):
@@ -43,9 +43,7 @@ def setparameters(system, random8):
   global ZEncrypt
   global ZDecrypt
   global homomorphic_add
-  global mult_count
 
-  mult_count = 1
   b = 2**2
 
   if system in sntrup:
@@ -260,12 +258,12 @@ def setparameters(system, random8):
     # return h,(f,1/R3_fromR(g))
 
   def Encrypt(m,h):
-    #assert Short_is(r)
+    #assert Short_is(r)\
+    mult_count = 1
     assert h in Rq
-    return Round(h*Rq_fromR(m))
+    return Round(h*Rq_fromR(m)), mult_count
 
-  def Decrypt(c,k):
-    global mult_count
+  def Decrypt(c,mult_count,k):
     f,v = k
     #assert Rounded_is(c)
     assert Short_is(f)
@@ -459,17 +457,18 @@ def setparameters(system, random8):
   # 使用私鑰 sk 對密文 c 進行解密
   # 輸入: c (bytes), sk (bytes)
   # 回傳: r (Polynomial)
-  def ZDecrypt(c, sk):
+  def ZDecrypt(c, mult_count, sk):
     assert len(sk) == SecretKeys_bytes
     #assert len(c) == Ciphertexts_bytes
     f = Small_decode(sk[:Small_bytes])
     v = R3_fromR(Small_decode(sk[Small_bytes:]))
     #c = Rounded_decode(c)
-    return Decrypt(c, (f, v))
+    return Decrypt(c, mult_count, (f, v))
 
-  def homomorphic_add(c_1, c_2):
+  def homomorphic_add(c_1, mult_count1, c_2, mult_count2):
+    assert mult_count1 == mult_count2
     c_sum = R_fromRq(Rq_fromR(c_1) + Rq_fromR(c_2))
-    return c_sum
+    return c_sum, mult_count1
   
   global get_log_q
   global BitDecompose_poly
@@ -566,9 +565,8 @@ def setparameters(system, random8):
     return R_fromRq(Rq_fromR(Vector_DotProduct(c_mult_tilde_D, evk)))
   
   global homomorphic_mult
-  def homomorphic_mult(c_1,c_2,evk):
-    global mult_count
-    mult_count += 1
+  def homomorphic_mult(c_1, mult_count1, c_2, mult_count2, evk):
+    mult_count = mult_count1 + mult_count2
     # 1. 計算 P(c1) 和 P(c2)
     # vec1 和 vec2 都是長度為 l 的向量
     vec1 = PowerOf2_poly(c_1)
@@ -589,4 +587,4 @@ def setparameters(system, random8):
     
 
     c_mult = KeySwitch(c_mult_tilde_B, evk)
-    return c_mult
+    return c_mult, mult_count

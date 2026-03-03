@@ -71,8 +71,8 @@ def run_pke_test_batch(sys_name, iterations):
 
             # 4. 加密
             t_start_encrypt = time.time()
-            c1 = ZEncrypt(r1, pk)
-            c2 = ZEncrypt(r2, pk)
+            c1, mult_count1 = ZEncrypt(r1, pk)
+            c2, mult_count2 = ZEncrypt(r2, pk)
             total_time_encrypt += (time.time() - t_start_encrypt)
             
             # ==========================================
@@ -80,34 +80,38 @@ def run_pke_test_batch(sys_name, iterations):
             # ==========================================
             try:
                 t_add = time.time()
-                c_add = homomorphic_add(c1, c2)
+                c_add, mult_count_add = homomorphic_add(c1, mult_count1, c2, mult_count2)
                 total_time_add += (time.time() - t_add)
 
                 t_add_dec = time.time()
-                r_dec_add = ZDecrypt(c_add, sk)
+                r_dec_add = ZDecrypt(c_add, mult_count_add, sk)
                 total_time_dec_add += (time.time() - t_add_dec)
                 
                 if r_dec_add == expected_add:
                     add_correct_count += _sage_const_1 
             except Exception as e:
-                pass 
+                import traceback
+                print(f"[同態加法錯誤] 可能因為 KeyGen 失敗或其他原因，詳細錯誤如下：")
+                traceback.print_exc()
 
             # ==========================================
             # 測試 B: 同態乘法 
             # ==========================================
             try:
                 t_mult = time.time()
-                c_mult = homomorphic_mult(c1, c2, evk)
+                c_mult, mult_count_mult = homomorphic_mult(c1, mult_count1, c2, mult_count2, evk)
                 total_time_mult += (time.time() - t_mult)
                 
                 t_mult_dec = time.time()
-                r_dec_mult = ZDecrypt(c_mult, sk)
+                r_dec_mult = ZDecrypt(c_mult, mult_count_mult, sk)
                 total_time_dec_mult += (time.time() - t_mult_dec)
                 
                 if r_dec_mult == expected_mult:
                     mult_correct_count += _sage_const_1 
             except Exception as e:
-                pass
+                import traceback
+                print(f"[同態乘法錯誤] 可能因為 KeyGen 失敗或其他原因，詳細錯誤如下：")
+                traceback.print_exc()
 
         except Exception as e:
             pass
@@ -132,7 +136,7 @@ def run_pke_test_batch(sys_name, iterations):
             print("[Key 釋放錯誤] 可能因為 KeyGen 失敗而未定義，詳細錯誤如下：")
             traceback.print_exc() 
         
-        # 呼叫垃圾回收器，清理孤立的記憶體碎片
+        # 呼叫垃圾回收器，清理記憶體碎片
         gc.collect()
             
     print(" 完成!")
@@ -168,8 +172,8 @@ def run_pke_test_batch(sys_name, iterations):
 
 print("\n=== 2. 開始執行同態運算效能評估 ===")
 
-systems_to_test = ['sntrupHo1637'] 
-#systems_to_test = ['sntrupHo653', 'sntrupHo761', 'sntrupHo857', 'sntrupHo953', 'sntrupHo1013', 'sntrupHo1277', 'sntrupHo1609', 'sntrupHo1637']
+systems_to_test = ['primehe653','primehe1637'] 
+#systems_to_test = ['primehe653', 'primehe761', 'primehe857', 'primehe953', 'primehe1013', 'primehe1277', 'primehe1609', 'primehe1637']
 
 results = {}
 iterations = _sage_const_10   # 設定為跑 10 次取平均 (測試用)

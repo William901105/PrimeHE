@@ -79,7 +79,6 @@ def find_valid_parameters(b=2): # 將 b 作為參數傳入，預設為 2
                             assert q.is_prime()
                             assert w > 0
                             assert 2*p >= 3*w
-                            # 替換為新的 assert 條件
                             assert q >= 14*w**2 + 30*w**2*p + 6*b*w*p*current_l + 6*b*w*current_l + 1
                             assert q%6 == 1
                             assert p%4 == 1
